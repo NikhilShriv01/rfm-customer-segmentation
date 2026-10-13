@@ -1,72 +1,79 @@
-# Customer Segmentation \& RFM Analysis
+# Customer Segmentation & RFM Analysis
 
-An end-to-end **RFM (Recency, Frequency, Monetary)** customer-segmentation project on a UK online-retail dataset: clean the raw transactions in Python, score every customer, classify them into **10 behavioural segments**, then build a SQL analytics layer and an **interactive Power BI dashboard** that turns the segments into concrete retention actions.
+RFM (Recency, Frequency, Monetary) segmentation of a UK online giftware retailer. Transactions are cleaned and scored in Python, loaded into MySQL for a SQL analysis layer, and explored in a two-page Power BI report.
 
->  **Stack:** Python (pandas) · SQL (MySQL) · Power BI
-> 
-> **Data:** \[Online Retail II](https://www.kaggle.com/datasets/lakshmi25npathi/online-retail-dataset) — UK gift retailer, \~1M invoice line-items · **108K customers · $10.3M revenue**
-> 
-> **Question:**: Who are our most valuable customers, who is slipping away, and where should retention effort go?
+**Stack:** Python (pandas) · SQL (MySQL) · Power BI
 
+**Data:** [Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii) (UCI), `Year 2009-2010` sheet: 525,461 invoice lines, 4,312 identified customers, £8.83M identified-customer revenue
+
+**Question:** Who are the most valuable customers, who is drifting away, and where should retention effort go?
+
+## Key findings
+
+- **Champions are 6.4% of customers (275) and bring in 43.3% of revenue.** They average £13,896 against £2,048 for all customers.
+- **27.3% of customers generate 80% of revenue.**
+- **Lost and Hibernating together are 44% of customers but 14% of revenue.**
+- **32.9% of customers bought only once** during the year.
 
 ## Dashboard
 
-| Overview | Customer Deep Dive |
-|---|---|
-| ![Overview](dashboard/Overview.png) | ![Deep Dive](dashboard/Deep_Dive.png) |
+**Overview**
 
+![Overview](dashboard/Overview.png)
 
+**Customer Deep Dive**: filter by segment, value tier and days since last purchase; the scatter and the top-50 table update with the filters.
 
-An interactive exploration page where a user can:
+![Customer Deep Dive](dashboard/Deep_Dive.png)
 
-* **Filter by segment** (Champions, At Risk, Loyal, …) and by **value tier**, with KPI cards (selected customers, revenue, avg value) updating live.
-* **Slide a recency filter** ("days since last purchase") to isolate lapsing customers.
-* Read the **frequency-vs-lifetime-value scatter**, colour-coded by segment, which surfaces the customer-clustering pattern — a dense low-frequency base and a thin tail of high-value repeat buyers.
-* Drill into a per-customer table showing lifetime value, order count, days inactive, and a **`recommended\_action`** (e.g. *Retain \& Reward* for Champions) — segmentation translated directly into what to do.
+## Segments
 
-\---
+| Segment | Customers | % of customers | % of revenue | Avg value (£) |
+|---|---:|---:|---:|---:|
+| Champions | 275 | 6.38 | 43.27 | 13,896 |
+| About to Sleep | 1,028 | 23.84 | 14.24 | 1,223 |
+| Potential Loyalists | 688 | 15.96 | 13.60 | 1,746 |
+| Hibernating | 861 | 19.97 | 7.82 | 802 |
+| At Risk | 184 | 4.27 | 6.38 | 3,060 |
+| Loyal Customers | 95 | 2.20 | 6.24 | 5,804 |
+| Lost | 1,032 | 23.93 | 6.09 | 521 |
+| Can't Lose Them | 31 | 0.72 | 1.94 | 5,531 |
+| New Customers | 117 | 2.71 | 0.42 | 319 |
+| Promising | 1 | 0.02 | 0.00 | 373 |
 
-## What it does
+## How it works
 
-1. **Clean** — load the raw Excel transactions, handle missing customer IDs, drop returns/cancellations (negative quantity \& amount), compute line-item revenue.
-2. **Score** — per customer, compute Recency (days since last purchase), Frequency (unique invoices), Monetary (total spend); assign 1-4 quartile scores on each dimension.
-3. **Segment** — classify customers into 10 named segments from their R/F/M scores: **Champions, Loyal Customers, Potential Loyalists, New Customers, Promising, At Risk, Can't Lose Them, About to Sleep, Hibernating, Lost**.
-4. **Act** — a SQL layer with segment-summary and action-priority views surfacing high-value **At-Risk** customers for targeted retention, plus revenue-concentration analysis across segments; the Power BI page makes it explorable.
+1. **Clean** (`RFM.ipynb`): drop rows with no Customer ID, since they can't be tied to a person, and drop returns and cancellations.
+2. **Score**: Recency (days since last purchase) and Monetary (total spend) are scored 1 to 4 by quartile. Frequency (distinct invoices) uses fixed bands of 1, 2 to 4, 5 to 9 and 10 or more, because a third of customers bought exactly once and quartiles can't split that many ties.
+3. **Segment**: 10 named segments from the three scores, with narrow rules checked before broad ones.
+4. **Analyse** (`rfm_Query.sql`): builds the database, loads the scored customers, and creates a segment summary, Champion and At-Risk drill-downs, a Pareto query, and three views for Power BI. The views add a recommended action and a value tier to every customer.
 
-\---
+## Version history
 
-## Key ideas
-
-* **Recency/Frequency/Monetary** captures value on three independent axes, so a big spender who has gone quiet (At Risk / Can't Lose Them) is handled differently from a frequent small spender.
-* **Quartile scoring** self-calibrates to the dataset instead of relying on hard-coded thresholds.
-* **The action layer is the point** — segmentation only matters if it changes what you do: the `recommended\_action` column and priority views rank exactly who to contact first.
-
-\---
+The first version reported 108,214 customers. That was wrong: each row with no Customer ID had been given its own synthetic ID, so 107,927 anonymous line items were counted as customers. Tie-breaking in the frequency score then ranked some of those rows above real repeat buyers, and two segment rules were ordered so that *Can't Lose Them* and *Lost* could never be assigned. The current version fixes all three, and the notebook's opening note shows the before and after.
 
 ## Repo structure
 
 ```
-RFM.ipynb            Python: clean -> RFM metrics -> quartile scoring -> 10-segment classification
-rfm\_Query.sql        SQL: segment summary, Champions/At-Risk drill-downs, action-priority views
+RFM.ipynb                  Python: clean -> RFM metrics -> scoring -> segments -> CSV export
+rfm_analysis_clean.csv     scored customers (output of the notebook, input to SQL)
+rfm_Query.sql              MySQL: build database, load CSV, analysis queries, views
 dashboard/
-  Ecom\_Analytics.pbix   Power BI report (interactive Customer Deep Dive page)
-  dashboard.png         page screenshot
+  Ecom_Analytics.pbix      Power BI report (Overview + Customer Deep Dive)
+  Overview.png
+  Deep_Dive.png
 ```
-
-\---
 
 ## Reproduce
 
-1. Download the [Online Retail II dataset](https://www.kaggle.com/datasets/lakshmi25npathi/online-retail-dataset) (`online\_retail\_II.xlsx`).
-2. Run `RFM.ipynb` to clean the data and produce `rfm\_analysis\_clean.csv`.
-3. Load that CSV into MySQL and run `rfm\_Query.sql` for the segment analysis and action views.
-4. Open the Power BI report on top of the results.
+1. Download `online_retail_II.xlsx` from [UCI](https://archive.ics.uci.edu/dataset/502/online+retail+ii) or the [Kaggle mirror](https://www.kaggle.com/datasets/lakshmi25npathi/online-retail-dataset), and run `RFM.ipynb` to produce `rfm_analysis_clean.csv`.
+2. In `rfm_Query.sql`, change the `LOAD DATA LOCAL INFILE` path to where your CSV is. MySQL Workbench needs `OPT_LOCAL_INFILE=1` under Edit Connection → Advanced → Others.
+3. Run the whole script. It drops and rebuilds the `ecommerce_analytics` database.
+4. Open `dashboard/Ecom_Analytics.pbix` and refresh.
 
-\---
+## Notes on the data
 
-## Notes on data handling
-
-* **Dates:** the source data is from 2009-2011; invoice dates are rebased forward in the notebook so recency reads on a recent scale for demo purposes — the *relative* recency between customers is unchanged.
-* **Missing customer IDs:** anonymous transactions are assigned synthetic IDs rather than dropped, so their revenue still counts in segment totals.
-* **Returns/cancellations:** rows with non-positive quantity or amount are removed before scoring.
-
+- **Anonymous rows:** 107,927 rows across 5,229 invoices (£1.19M) have no Customer ID. That revenue is real but can't be attributed to a customer, so every revenue figure here is identified-customer revenue.
+- **Returns:** 9,870 return and cancellation rows (£-483,795) are excluded rather than netted, which slightly overstates lifetime value for customers who returned goods.
+- **Dates** are shifted forward 14 years for presentation. Recency is measured from the last date in the data.
+- **Scope** is the 2009-2010 sheet only; the file also has 2010-2011.
+- **Currency** is GBP.

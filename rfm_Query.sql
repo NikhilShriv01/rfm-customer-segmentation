@@ -1,17 +1,42 @@
+-- ============================================================
+-- Setup: build the database from scratch
+-- Copy rfm_analysis_clean.csv (made by RFM.ipynb) into the folder
+-- shown by: SHOW VARIABLES LIKE 'secure_file_priv';
+-- ============================================================
+
+DROP DATABASE IF EXISTS ecommerce_analytics;
+CREATE DATABASE ecommerce_analytics;
 USE ecommerce_analytics;
 
--- Quick check: how many customers are in the RFM dataset?
-SELECT COUNT(*) AS total_customers
+CREATE TABLE rfm_analysis (
+    CustomerID  INT            NOT NULL PRIMARY KEY,
+    Recency     INT            NOT NULL,
+    Frequency   INT            NOT NULL,
+    Monetary    DECIMAL(12, 2) NOT NULL,
+    R_Score     TINYINT        NOT NULL,
+    F_Score     TINYINT        NOT NULL,
+    M_Score     TINYINT        NOT NULL,
+    RFM_Score   CHAR(3)        NOT NULL,
+    Segment     VARCHAR(30)    NOT NULL
+);
+
+LOAD DATA LOCAL INFILE 'C:/Projects/data_analytics/Ecomm_RFM/rfm_analysis_clean.csv'
+INTO TABLE rfm_analysis
+FIELDS TERMINATED BY ',' OPTIONALLY ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 LINES;
+
+-- Load check. Expected: 4312 | 10 | 2.95 | 8832003.26
+SELECT COUNT(*) AS customers,
+       COUNT(DISTINCT Segment) AS segments,
+       MIN(Monetary) AS min_value,
+       SUM(Monetary) AS total_revenue
 FROM rfm_analysis;
 
 -- Take a quick look at the data
 SELECT *
 FROM rfm_analysis
 LIMIT 20;
-
--- CustomerID uniquely identifies each customer
-ALTER TABLE rfm_analysis
-ADD PRIMARY KEY (CustomerID);
 
 -- Review the table structure
 DESCRIBE rfm_analysis;
@@ -80,7 +105,7 @@ SELECT
     ROUND(Monetary, 2) AS lifetime_value,
     ROUND(Monetary / Frequency, 2) AS historical_avg_order,
     RFM_Score,
-    CONCAT('$', ROUND(Monetary, 2), ' at risk') AS revenue_at_risk
+    CONCAT('GBP ', ROUND(Monetary, 2), ' at risk') AS revenue_at_risk
 FROM rfm_analysis
 WHERE Segment = 'At Risk'
 ORDER BY Monetary DESC
@@ -99,8 +124,11 @@ WITH ranked_customers AS (
         ROUND(Monetary, 2) AS lifetime_value,
         
         -- Running revenue total from highest-value customers downward
+        -- ROWS frame + CustomerID tiebreak: the default RANGE frame gives tied
+        -- Monetary values the same running total, which can skip the 80% row
         SUM(Monetary) OVER (
-            ORDER BY Monetary DESC
+            ORDER BY Monetary DESC, CustomerID
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
         ) AS running_total,
         
         -- Total revenue across all customers
@@ -108,7 +136,7 @@ WITH ranked_customers AS (
         
         -- Rank customers by lifetime value
         ROW_NUMBER() OVER (
-            ORDER BY Monetary DESC
+            ORDER BY Monetary DESC, CustomerID
         ) AS customer_rank
         
     FROM rfm_analysis
@@ -137,6 +165,7 @@ CROSS JOIN total_count
 WHERE running_total * 100.0 / total_revenue >= 80.0
 ORDER BY customer_rank
 LIMIT 1;
+-- Expected (v2): customer_rank 1,176 = 27.27% of customers
 
 
 -- ============================================================
@@ -171,12 +200,12 @@ SELECT
     ROUND(MAX(Monetary), 2) AS max_value
 
 FROM rfm_analysis
-GROUP BY Segment
-ORDER BY total_revenue DESC;
+GROUP BY Segment;
 
--- Quick check of the segment summary
+-- Quick check of the segment summary (sort here, not inside the view)
 SELECT *
-FROM vw_segment_summary;
+FROM vw_segment_summary
+ORDER BY total_revenue DESC;
 
 
 -- ============================================================
@@ -191,6 +220,7 @@ SELECT
     Segment,
     Recency,
     Frequency,
+    Monetary,                                   -- the Power BI report uses this column
     ROUND(Monetary, 2) AS lifetime_value,
     ROUND(Monetary / Frequency, 2) AS avg_order_value,
     R_Score,
@@ -262,10 +292,10 @@ SELECT
     CASE 
         WHEN Segment = 'Champions' AND Monetary > 10000 THEN 1
         WHEN Segment = 'At Risk' AND Monetary > 5000 THEN 1
+        WHEN Segment = 'Can''t Lose Them' THEN 1
         WHEN Segment = 'Champions' THEN 2
         WHEN Segment = 'At Risk' THEN 2
         WHEN Segment = 'Loyal Customers' THEN 3
-        WHEN Segment = 'Can''t Lose Them' THEN 2
         ELSE 4
     END AS priority_level,
 
@@ -306,15 +336,15 @@ WHERE Segment IN (
     'At Risk',
     'Loyal Customers',
     'Can''t Lose Them',
-    'New Customers'
-)
-
-ORDER BY priority_level ASC, Monetary DESC;
+    'New Customers',
+    'Potential Loyalists'
+);
 
 
 -- Quick check of the highest-priority customers
 SELECT *
 FROM vw_action_priority
+ORDER BY priority_level ASC, lifetime_value DESC
 LIMIT 20;
 
 
@@ -325,16 +355,7 @@ LIMIT 20;
 -- Confirm the views were created
 SHOW TABLES LIKE 'vw_%';
 
--- Check the database connection
-SELECT @@hostname;
-
-SELECT CURRENT_USER();
-
-SELECT USER();
-
--- Review all customer segments
-USE ecommerce_analytics;
-
+-- Review all customer segments (expect 10)
 SELECT DISTINCT Segment
 FROM rfm_analysis;
 
